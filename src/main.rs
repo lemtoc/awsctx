@@ -18,7 +18,11 @@ const SELECT_PAGE_SIZE: usize = 10;
 #[derive(Parser, Debug)]
 #[command(name = "awsctx", version, about = "Switch AWS SSO profiles")]
 struct Cli {
-    #[arg(long, global = true, help = "Ignore AWS_PROFILE_PREFIX")]
+    #[arg(
+        long,
+        global = true,
+        help = "Ignore AWS_PROFILE_PREFIX and AWS_ACCOUNT_ID"
+    )]
     all: bool,
 
     #[command(subcommand)]
@@ -292,14 +296,21 @@ fn candidates_or_error(
         .into());
     }
 
-    let prefix = env::var("AWS_PROFILE_PREFIX").ok();
-    let candidates = filter_profiles(profiles, prefix.as_deref(), include_all);
+    let prefix = non_empty_env("AWS_PROFILE_PREFIX");
+    let account_id = non_empty_env("AWS_ACCOUNT_ID");
+    let candidates = filter_profiles(
+        profiles,
+        prefix.as_deref(),
+        account_id.as_deref(),
+        include_all,
+    );
     if candidates.is_empty() {
-        if let Some(prefix) = prefix.filter(|value| !value.is_empty()) {
+        let filters = active_filter_descriptions(prefix.as_deref(), account_id.as_deref());
+        if !filters.is_empty() {
             return Err(ExitError::new(
                 format!(
-                    "No SSO profiles match AWS_PROFILE_PREFIX={} in {}.",
-                    prefix,
+                    "No SSO profiles match {} in {}.",
+                    filters.join(" and "),
                     config_path.display()
                 ),
                 1,
@@ -315,6 +326,24 @@ fn candidates_or_error(
     }
 
     Ok(candidates)
+}
+
+fn non_empty_env(name: &str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.is_empty())
+}
+
+fn active_filter_descriptions(prefix: Option<&str>, account_id: Option<&str>) -> Vec<String> {
+    let mut filters = Vec::new();
+
+    if let Some(prefix) = prefix {
+        filters.push(format!("AWS_PROFILE_PREFIX={prefix}"));
+    }
+
+    if let Some(account_id) = account_id {
+        filters.push(format!("AWS_ACCOUNT_ID={account_id}"));
+    }
+
+    filters
 }
 
 fn require_shell_integration() -> Result<()> {

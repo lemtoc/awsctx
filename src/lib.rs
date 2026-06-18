@@ -135,16 +135,25 @@ pub fn parse_sso_profiles(input: &str) -> Result<Vec<SsoProfile>> {
 pub fn filter_profiles(
     profiles: &[SsoProfile],
     prefix: Option<&str>,
+    account_id: Option<&str>,
     include_all: bool,
 ) -> Vec<SsoProfile> {
-    match prefix {
-        Some(prefix) if !include_all && !prefix.is_empty() => profiles
-            .iter()
-            .filter(|profile| profile.name.starts_with(prefix))
-            .cloned()
-            .collect(),
-        _ => profiles.to_vec(),
+    if include_all {
+        return profiles.to_vec();
     }
+
+    profiles
+        .iter()
+        .filter(|profile| match prefix {
+            Some(prefix) if !prefix.is_empty() => profile.name.starts_with(prefix),
+            _ => true,
+        })
+        .filter(|profile| match account_id {
+            Some(account_id) if !account_id.is_empty() => profile.sso_account_id == account_id,
+            _ => true,
+        })
+        .cloned()
+        .collect()
 }
 
 pub fn find_profile_by_name(profiles: &[SsoProfile], name: &str) -> Option<SsoProfile> {
@@ -709,10 +718,53 @@ sso_role_name = Admin
     fn filters_profiles_by_case_sensitive_prefix() {
         let profiles = parse_sso_profiles(SAMPLE_CONFIG).expect("profiles should parse");
 
-        assert_eq!(filter_profiles(&profiles, Some("prod"), false).len(), 1);
-        assert_eq!(filter_profiles(&profiles, Some("PROD"), false).len(), 0);
-        assert_eq!(filter_profiles(&profiles, Some(""), false).len(), 2);
-        assert_eq!(filter_profiles(&profiles, Some("missing"), true).len(), 2);
+        assert_eq!(
+            filter_profiles(&profiles, Some("prod"), None, false).len(),
+            1
+        );
+        assert_eq!(
+            filter_profiles(&profiles, Some("PROD"), None, false).len(),
+            0
+        );
+        assert_eq!(filter_profiles(&profiles, Some(""), None, false).len(), 2);
+        assert_eq!(
+            filter_profiles(&profiles, Some("missing"), None, true).len(),
+            2
+        );
+    }
+
+    #[test]
+    fn filters_profiles_by_account_id() {
+        let profiles = parse_sso_profiles(SAMPLE_CONFIG).expect("profiles should parse");
+
+        assert_eq!(
+            filter_profiles(&profiles, None, Some("444455556666"), false)
+                .first()
+                .map(|profile| profile.name.as_str()),
+            Some("dev-admin")
+        );
+        assert_eq!(
+            filter_profiles(&profiles, None, Some("4444"), false).len(),
+            0
+        );
+        assert_eq!(
+            filter_profiles(&profiles, None, Some("444455556666"), true).len(),
+            2
+        );
+    }
+
+    #[test]
+    fn combines_prefix_and_account_id_filters() {
+        let profiles = parse_sso_profiles(SAMPLE_CONFIG).expect("profiles should parse");
+
+        assert_eq!(
+            filter_profiles(&profiles, Some("dev"), Some("444455556666"), false).len(),
+            1
+        );
+        assert_eq!(
+            filter_profiles(&profiles, Some("prod"), Some("444455556666"), false).len(),
+            0
+        );
     }
 
     #[test]

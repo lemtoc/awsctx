@@ -99,7 +99,16 @@ export AWS_PROFILE_PREFIX=prod-
 awsctx
 ```
 
-Ignore `AWS_PROFILE_PREFIX` for one command:
+Limit the candidates to one AWS account ID:
+
+```sh
+export AWS_ACCOUNT_ID=111122223333
+awsctx
+```
+
+When both `AWS_PROFILE_PREFIX` and `AWS_ACCOUNT_ID` are set, `awsctx` only shows profiles that match both filters.
+
+Ignore `AWS_PROFILE_PREFIX` and `AWS_ACCOUNT_ID` for one command:
 
 ```sh
 awsctx --all
@@ -120,7 +129,7 @@ prod-admin  111122223333  AWSAdministratorAccess  ap-northeast-1
 dev-admin   444455556666  AWSAdministratorAccess  ap-northeast-1
 ```
 
-List all SSO profiles, ignoring `AWS_PROFILE_PREFIX`:
+List all SSO profiles, ignoring `AWS_PROFILE_PREFIX` and `AWS_ACCOUNT_ID`:
 
 ```sh
 awsctx list --all
@@ -181,7 +190,7 @@ Direct login without changing `AWS_PROFILE`:
 awsctx login --no-switch prod-admin
 ```
 
-Ignore `AWS_PROFILE_PREFIX` when choosing the login profile:
+Ignore `AWS_PROFILE_PREFIX` and `AWS_ACCOUNT_ID` when choosing the login profile:
 
 ```sh
 awsctx login --all
