@@ -38,6 +38,12 @@ awsctx init zsh
 awsctx init bash
 ```
 
+自動で fish の `config.fish` に追加する場合:
+
+```sh
+awsctx init fish
+```
+
 dotfiles などで手動管理したい場合は、次の 1 行を rc ファイルへ追加します。
 
 ```sh
@@ -48,6 +54,12 @@ bash の場合:
 
 ```sh
 eval "$(awsctx activate bash)"
+```
+
+fish の場合:
+
+```fish
+awsctx activate fish | source
 ```
 
 ## 切り替え

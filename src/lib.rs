@@ -273,11 +273,70 @@ pub fn activation_script(shell: Shell) -> &'static str {
 }
 "#
         }
+        Shell::Fish => {
+            r#"function awsctx
+  if test (count $argv) -eq 0; or begin; test "$argv[1]" = "--all"; and test (count $argv) -eq 1; end
+    set -l __awsctx_profile
+    set -l __awsctx_status
+    begin
+      set -lx AWSCTX_SHELL_INTEGRATION 1
+      set __awsctx_profile (command awsctx __switch $argv)
+      set __awsctx_status $status
+    end
+    if test $__awsctx_status -ne 0
+      return $__awsctx_status
+    end
+    set -gx AWS_PROFILE "$__awsctx_profile"
+    printf 'Switched to %s.\n' "$__awsctx_profile" >&2
+    return 0
+  end
+
+  if test "$argv[1]" = "login"
+    set -l __awsctx_args $argv[2..-1]
+    for __awsctx_arg in $__awsctx_args
+      switch "$__awsctx_arg"
+        case --no-switch -h --help
+          command awsctx login $__awsctx_args
+          return $status
+      end
+    end
+
+    set -l __awsctx_profile
+    set -l __awsctx_status
+    begin
+      set -lx AWSCTX_SHELL_INTEGRATION 1
+      set __awsctx_profile (command awsctx __login $__awsctx_args)
+      set __awsctx_status $status
+    end
+    if test $__awsctx_status -ne 0
+      return $__awsctx_status
+    end
+    if not command -q aws
+      printf 'aws command not found. Install AWS CLI to use awsctx login.\n' >&2
+      return 1
+    end
+    command aws sso login --profile "$__awsctx_profile"
+    set __awsctx_status $status
+    if test $__awsctx_status -ne 0
+      return $__awsctx_status
+    end
+    set -gx AWS_PROFILE "$__awsctx_profile"
+    printf 'Logged in and switched to %s.\n' "$__awsctx_profile" >&2
+    return 0
+  end
+
+  command awsctx $argv
+end
+"#
+        }
     }
 }
 
 pub fn init_line(shell: Shell) -> String {
-    format!("eval \"$(awsctx activate {})\"", shell.as_str())
+    match shell {
+        Shell::Bash | Shell::Zsh => format!("eval \"$(awsctx activate {})\"", shell.as_str()),
+        Shell::Fish => "awsctx activate fish | source".to_owned(),
+    }
 }
 
 pub fn init_block(shell: Shell) -> String {
@@ -329,21 +388,27 @@ pub fn init_rc_file(path: &Path, shell: Shell) -> Result<()> {
         }
     };
     let updated = update_managed_block(&contents, &init_block(shell))?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}.", parent.display()))?;
+    }
     fs::write(path, updated).with_context(|| format!("Failed to write {}.", path.display()))
 }
 
 pub fn rc_path(shell: Shell) -> Result<PathBuf> {
     let home = env::var_os("HOME").ok_or_else(|| anyhow!("HOME is not set."))?;
-    let file_name = match shell {
-        Shell::Bash => ".bashrc",
-        Shell::Zsh => ".zshrc",
+    let path = match shell {
+        Shell::Bash => PathBuf::from(".bashrc"),
+        Shell::Zsh => PathBuf::from(".zshrc"),
+        Shell::Fish => PathBuf::from(".config").join("fish").join("config.fish"),
     };
-    Ok(PathBuf::from(home).join(file_name))
+    Ok(PathBuf::from(home).join(path))
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Shell {
     Bash,
+    Fish,
     Zsh,
 }
 
@@ -351,6 +416,7 @@ impl Shell {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Bash => "bash",
+            Self::Fish => "fish",
             Self::Zsh => "zsh",
         }
     }
@@ -362,9 +428,10 @@ impl std::str::FromStr for Shell {
     fn from_str(value: &str) -> Result<Self> {
         match value {
             "bash" => Ok(Self::Bash),
+            "fish" => Ok(Self::Fish),
             "zsh" => Ok(Self::Zsh),
             _ => Err(anyhow!(
-                "Unsupported shell: {value}. Supported shells: bash, zsh."
+                "Unsupported shell: {value}. Supported shells: bash, fish, zsh."
             )),
         }
     }
@@ -586,5 +653,20 @@ sso_role_name = Admin
             updated,
             "before\n# >>> awsctx initialize >>>\neval \"$(awsctx activate zsh)\"\n# <<< awsctx initialize <<<\nafter\n"
         );
+    }
+
+    #[test]
+    fn formats_fish_init_line() {
+        assert_eq!(init_line(Shell::Fish), "awsctx activate fish | source");
+    }
+
+    #[test]
+    fn renders_fish_activation_script() {
+        let script = activation_script(Shell::Fish);
+
+        assert!(script.contains("function awsctx"));
+        assert!(script.contains("set -gx AWS_PROFILE"));
+        assert!(script.contains("command awsctx __switch"));
+        assert!(script.contains("command awsctx __login"));
     }
 }

@@ -253,7 +253,7 @@ fn require_shell_integration() -> Result<()> {
     }
 
     Err(ExitError::new(
-        "Shell integration is not active. Run eval \"$(awsctx activate <shell>)\" or awsctx init <shell>.",
+        "Shell integration is not active. Run awsctx init <shell> or load awsctx activate <shell> in your shell config.",
         1,
     )
     .into())
