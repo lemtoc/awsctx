@@ -109,6 +109,7 @@ awsctx list
 
 ```text
 NAME        ACCOUNT_ID    ROLE                    REGION
+──────────  ────────────  ──────────────────────  ──────────────
 prod-admin  111122223333  AWSAdministratorAccess  ap-northeast-1
 dev-admin   444455556666  AWSAdministratorAccess  ap-northeast-1
 ```

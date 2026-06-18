@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 use awsctx::{
     ProfileOption, SHELL_INTEGRATION_ENV, Shell, SsoProfile, activation_script, current_profile,
-    filter_profiles, format_profiles_json, format_table, init_line, init_rc_file,
+    filter_profiles, format_profiles_json, format_table_with_style, init_line, init_rc_file,
     parse_sso_profiles, profile_options, rc_path, read_config, resolve_config_path,
 };
 use clap::{Args, Parser, Subcommand};
@@ -9,6 +9,7 @@ use inquire::{InquireError, Select};
 use std::env;
 use std::error::Error;
 use std::fmt;
+use std::io::{self, IsTerminal};
 use std::process::{Command, ExitCode};
 
 const SELECT_PAGE_SIZE: usize = 10;
@@ -141,7 +142,12 @@ fn list_command(include_all: bool, args: ListArgs) -> Result<()> {
     if args.json {
         println!("{}", format_profiles_json(&candidates)?);
     } else {
-        println!("{}", format_table(&candidates));
+        let use_color = env::var_os("NO_COLOR").is_none() && io::stdout().is_terminal();
+        let current_profile = current_profile();
+        println!(
+            "{}",
+            format_table_with_style(&candidates, current_profile.as_deref(), use_color)
+        );
     }
 
     Ok(())

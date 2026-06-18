@@ -38,14 +38,17 @@ impl SsoProfile {
 pub struct ProfileOption {
     profile: SsoProfile,
     is_current: bool,
+    row: String,
 }
 
 impl ProfileOption {
-    pub fn new(profile: SsoProfile, current_profile: Option<&str>) -> Self {
+    fn new(profile: SsoProfile, current_profile: Option<&str>, widths: TableWidths) -> Self {
         let is_current = current_profile == Some(profile.name.as_str());
+        let row = format_profile_row(&profile, widths);
         Self {
             profile,
             is_current,
+            row,
         }
     }
 
@@ -67,11 +70,10 @@ impl ProfileOption {
 
 impl fmt::Display for ProfileOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let row = format_profile_row(&self.profile);
         if self.is_current && env::var_os("NO_COLOR").is_none() {
-            write!(formatter, "\x1b[32m{row}\x1b[0m")
+            write!(formatter, "\x1b[32m{}\x1b[0m", self.row)
         } else {
-            formatter.write_str(&row)
+            formatter.write_str(&self.row)
         }
     }
 }
@@ -155,52 +157,65 @@ pub fn profile_options(
     profiles: &[SsoProfile],
     current_profile: Option<&str>,
 ) -> Vec<ProfileOption> {
+    let widths = table_widths(profiles);
     profiles
         .iter()
         .cloned()
-        .map(|profile| ProfileOption::new(profile, current_profile))
+        .map(|profile| ProfileOption::new(profile, current_profile, widths))
         .collect()
 }
 
 pub fn format_table(profiles: &[SsoProfile]) -> String {
+    format_table_with_style(profiles, None, false)
+}
+
+pub fn format_table_with_style(
+    profiles: &[SsoProfile],
+    current_profile: Option<&str>,
+    use_color: bool,
+) -> String {
     let headers = ["NAME", "ACCOUNT_ID", "ROLE", "REGION"];
-    let widths = [
-        column_width(profiles, headers[0].len(), |profile| profile.name.as_str()),
-        column_width(profiles, headers[1].len(), |profile| {
-            profile.sso_account_id.as_str()
-        }),
-        column_width(profiles, headers[2].len(), |profile| {
-            profile.sso_role_name.as_str()
-        }),
-        column_width(profiles, headers[3].len(), |profile| {
-            profile.region.as_deref().unwrap_or_default()
-        }),
+    let widths = table_widths(profiles);
+    let underline = [
+        "─".repeat(widths.name),
+        "─".repeat(widths.account_id),
+        "─".repeat(widths.role),
+        "─".repeat(widths.region),
     ];
 
-    let mut lines = vec![format!(
-        "{:<name_width$}  {:<account_width$}  {:<role_width$}  {:<region_width$}",
+    let header = format!(
+        "{:<name_width$}  {:<account_width$}  {:<role_width$}  {}",
         headers[0],
         headers[1],
         headers[2],
         headers[3],
-        name_width = widths[0],
-        account_width = widths[1],
-        role_width = widths[2],
-        region_width = widths[3],
-    )];
+        name_width = widths.name,
+        account_width = widths.account_id,
+        role_width = widths.role,
+    );
+    let separator = format!(
+        "{:<name_width$}  {:<account_width$}  {:<role_width$}  {}",
+        underline[0],
+        underline[1],
+        underline[2],
+        underline[3],
+        name_width = widths.name,
+        account_width = widths.account_id,
+        role_width = widths.role,
+    );
+
+    let mut lines = if use_color {
+        vec![dim(&header), dim(&separator)]
+    } else {
+        vec![header, separator]
+    };
 
     lines.extend(profiles.iter().map(|profile| {
-        format!(
-            "{:<name_width$}  {:<account_width$}  {:<role_width$}  {:<region_width$}",
-            profile.name,
-            profile.sso_account_id,
-            profile.sso_role_name,
-            profile.region.as_deref().unwrap_or_default(),
-            name_width = widths[0],
-            account_width = widths[1],
-            role_width = widths[2],
-            region_width = widths[3],
-        )
+        if use_color {
+            format_profile_row_with_color(profile, current_profile, widths)
+        } else {
+            format_profile_row(profile, widths)
+        }
     }));
 
     lines.join("\n")
@@ -483,14 +498,78 @@ fn profile_name_from_section(section_name: &str) -> Option<&str> {
         .filter(|name| !name.is_empty())
 }
 
-fn format_profile_row(profile: &SsoProfile) -> String {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TableWidths {
+    name: usize,
+    account_id: usize,
+    role: usize,
+    region: usize,
+}
+
+fn table_widths(profiles: &[SsoProfile]) -> TableWidths {
+    TableWidths {
+        name: column_width(profiles, "NAME".len(), |profile| profile.name.as_str()),
+        account_id: column_width(profiles, "ACCOUNT_ID".len(), |profile| {
+            profile.sso_account_id.as_str()
+        }),
+        role: column_width(profiles, "ROLE".len(), |profile| {
+            profile.sso_role_name.as_str()
+        }),
+        region: column_width(profiles, "REGION".len(), |profile| {
+            profile.region.as_deref().unwrap_or_default()
+        }),
+    }
+}
+
+fn format_profile_row(profile: &SsoProfile, widths: TableWidths) -> String {
     format!(
-        "{}  {}  {}  {}",
+        "{:<name_width$}  {:<account_width$}  {:<role_width$}  {}",
         profile.name,
         profile.sso_account_id,
         profile.sso_role_name,
-        profile.region.as_deref().unwrap_or_default()
+        profile.region.as_deref().unwrap_or_default(),
+        name_width = widths.name,
+        account_width = widths.account_id,
+        role_width = widths.role,
     )
+}
+
+fn format_profile_row_with_color(
+    profile: &SsoProfile,
+    current_profile: Option<&str>,
+    widths: TableWidths,
+) -> String {
+    let name = format!("{:<width$}", profile.name, width = widths.name);
+    let account_id = format!(
+        "{:<width$}",
+        profile.sso_account_id,
+        width = widths.account_id
+    );
+    let role = format!("{:<width$}", profile.sso_role_name, width = widths.role);
+    let region = profile.region.as_deref().unwrap_or_default();
+    let name = if current_profile == Some(profile.name.as_str()) {
+        green(&name)
+    } else {
+        cyan(&name)
+    };
+
+    format!("{}  {}  {}  {}", name, dim(&account_id), role, dim(region))
+}
+
+fn dim(value: &str) -> String {
+    ansi("90", value)
+}
+
+fn green(value: &str) -> String {
+    ansi("32", value)
+}
+
+fn cyan(value: &str) -> String {
+    ansi("36", value)
+}
+
+fn ansi(code: &str, value: &str) -> String {
+    format!("\x1b[{code}m{value}\x1b[0m")
 }
 
 fn column_width(
@@ -631,6 +710,72 @@ sso_role_name = Admin
     }
 
     #[test]
+    fn formats_table_with_header_separator() {
+        let profiles = parse_sso_profiles(SAMPLE_CONFIG).expect("profiles should parse");
+
+        let table = format_table(&profiles);
+        let lines = table.lines().collect::<Vec<_>>();
+
+        assert_eq!(
+            lines[0],
+            "NAME        ACCOUNT_ID    ROLE                    REGION"
+        );
+        assert_eq!(
+            lines[1],
+            "──────────  ────────────  ──────────────────────  ──────────────"
+        );
+        assert_eq!(
+            field_start(lines[2], "111122223333"),
+            field_start(lines[3], "444455556666")
+        );
+        assert_eq!(
+            field_start(lines[2], "AWSAdministratorAccess"),
+            field_start(lines[3], "AWSAdministratorAccess")
+        );
+        assert_eq!(
+            field_start(lines[2], "ap-northeast-1"),
+            field_start(lines[3], "ap-northeast-1")
+        );
+    }
+
+    #[test]
+    fn formats_table_with_ansi_colors() {
+        let profiles = parse_sso_profiles(SAMPLE_CONFIG).expect("profiles should parse");
+
+        let table = format_table_with_style(&profiles, Some("dev-admin"), true);
+        let plain_table = strip_ansi(&table);
+
+        assert!(table.contains("\x1b[90mNAME"));
+        assert!(table.contains("\x1b[36mprod-admin"));
+        assert!(table.contains("\x1b[32mdev-admin"));
+        assert!(table.contains("\x1b[90m111122223333"));
+        assert!(plain_table.contains("prod-admin  111122223333"));
+    }
+
+    #[test]
+    fn aligns_profile_options_like_table_rows() {
+        let profiles = parse_sso_profiles(SAMPLE_CONFIG).expect("profiles should parse");
+        let rows = profile_options(&profiles, Some("dev-admin"))
+            .iter()
+            .map(ToString::to_string)
+            .map(|row| strip_ansi(&row))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            field_start(&rows[0], "111122223333"),
+            field_start(&rows[1], "444455556666")
+        );
+        assert_eq!(
+            field_start(&rows[0], "AWSAdministratorAccess"),
+            field_start(&rows[1], "AWSAdministratorAccess")
+        );
+        assert_eq!(
+            field_start(&rows[0], "ap-northeast-1"),
+            field_start(&rows[1], "ap-northeast-1")
+        );
+    }
+
+    #[test]
     fn updates_existing_managed_block() {
         let contents =
             "before\n# >>> awsctx initialize >>>\nold\n# <<< awsctx initialize <<<\nafter\n";
@@ -657,5 +802,30 @@ sso_role_name = Admin
         assert!(script.contains("set -gx AWS_PROFILE"));
         assert!(script.contains("command awsctx __switch"));
         assert!(script.contains("command awsctx __login"));
+    }
+
+    fn strip_ansi(value: &str) -> String {
+        let mut stripped = String::new();
+        let mut chars = value.chars().peekable();
+
+        while let Some(character) = chars.next() {
+            if character == '\x1b' && chars.peek() == Some(&'[') {
+                chars.next();
+                for escape_character in chars.by_ref() {
+                    if escape_character == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                stripped.push(character);
+            }
+        }
+
+        stripped
+    }
+
+    fn field_start(line: &str, field: &str) -> usize {
+        line.find(field)
+            .unwrap_or_else(|| panic!("expected {field} in {line}"))
     }
 }
