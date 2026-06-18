@@ -1,97 +1,107 @@
 # awsctx
 
-awsctx は、AWS IAM Identity Center を使う SSO Profile を選び、現在のシェルの `AWS_PROFILE` を切り替えるための CLI ツールです。
+`awsctx` switches the active AWS SSO profile in your current shell.
 
-## インストール
+It reads SSO profiles from the same AWS config file used by the AWS CLI, shows a selectable list, and updates `AWS_PROFILE` for the shell session you are working in.
 
-GitHub Releases からのインストールを主な導線にします。
+## Installation
+
+Install with mise from GitHub Releases:
 
 ```sh
 mise use -g github:lemtoc/awsctx
 ```
 
-Homebrew tap からもインストールできるようにします。
+Install with Homebrew:
 
 ```sh
 brew install lemtoc/tap/awsctx
 ```
 
-Rust 環境がある場合は `cargo install` も使えるようにします。
+Install from source with Cargo:
+
+```sh
+cargo install --git https://github.com/lemtoc/awsctx
+```
+
+After a crates.io release is available, this will also work:
 
 ```sh
 cargo install awsctx
 ```
 
-## シェル連携
+## Shell Integration
 
-`awsctx` が現在のシェルの `AWS_PROFILE` を変更するには、シェル連携が必要です。
+Shell integration is required when you want `awsctx` to change `AWS_PROFILE` in the current shell.
 
-自動で `.zshrc` に追加する場合:
+Add it automatically for zsh:
 
 ```sh
 awsctx init zsh
 ```
 
-自動で `.bashrc` に追加する場合:
+Add it automatically for bash:
 
 ```sh
 awsctx init bash
 ```
 
-自動で fish の `config.fish` に追加する場合:
+Add it automatically for fish:
 
 ```sh
 awsctx init fish
 ```
 
-dotfiles などで手動管理したい場合は、次の 1 行を rc ファイルへ追加します。
+If you manage your shell config yourself, add the loading line manually.
+
+For zsh:
 
 ```sh
 eval "$(awsctx activate zsh)"
 ```
 
-bash の場合:
+For bash:
 
 ```sh
 eval "$(awsctx activate bash)"
 ```
 
-fish の場合:
+For fish:
 
 ```fish
 awsctx activate fish | source
 ```
 
-## 切り替え
+## Switch Profiles
 
-`awsctx` を実行すると、`~/.aws/config` から SSO Profile を読み取り、選択 UI を表示します。
+Run `awsctx` to select an SSO profile from your AWS config file:
 
 ```sh
 awsctx
 ```
 
-切り替えに成功すると、現在のシェルの `AWS_PROFILE` が更新されます。
+On success, `AWS_PROFILE` is updated in the current shell.
 
 ```text
 Switched to prod-admin.
 ```
 
-`AWS_PROFILE_PREFIX` を設定すると、候補を前方一致で絞り込めます。
+Limit the candidates with `AWS_PROFILE_PREFIX`:
 
 ```sh
 export AWS_PROFILE_PREFIX=prod-
 awsctx
 ```
 
-絞り込みを一時的に無視して全 SSO Profile から選ぶ場合:
+Ignore `AWS_PROFILE_PREFIX` for one command:
 
 ```sh
 awsctx --all
 ```
 
-## 一覧表示
+## List Profiles
 
-SSO Profile を一覧表示します。`AWS_PROFILE` は変更しません。
+List matching SSO profiles without changing `AWS_PROFILE`:
 
 ```sh
 awsctx list
@@ -103,13 +113,13 @@ prod-admin  111122223333  AWSAdministratorAccess  ap-northeast-1
 dev-admin   444455556666  AWSAdministratorAccess  ap-northeast-1
 ```
 
-`AWS_PROFILE_PREFIX` を無視して一覧表示する場合:
+List all SSO profiles, ignoring `AWS_PROFILE_PREFIX`:
 
 ```sh
 awsctx list --all
 ```
 
-JSON で出力する場合:
+Print JSON:
 
 ```sh
 awsctx list --json
@@ -130,17 +140,19 @@ awsctx list --json
 
 ## SSO Login
 
-選択した SSO Profile に対して `aws sso login --profile <profile>` を実行します。ログインに成功すると、デフォルトではその SSO Profile に切り替えます。
+Run `aws sso login --profile <profile>` for the selected SSO profile:
 
 ```sh
 awsctx login
 ```
 
+After login succeeds, `awsctx` switches to that profile.
+
 ```text
 Logged in and switched to prod-admin.
 ```
 
-ログインだけを行い、`AWS_PROFILE` を変更しない場合:
+Login without changing `AWS_PROFILE`:
 
 ```sh
 awsctx login --no-switch
@@ -150,24 +162,20 @@ awsctx login --no-switch
 Logged in to prod-admin.
 ```
 
-絞り込みを一時的に無視して全 SSO Profile からログイン先を選ぶ場合:
+Ignore `AWS_PROFILE_PREFIX` when choosing the login profile:
 
 ```sh
 awsctx login --all
 ```
 
-## 対象になる Profile
+## Supported Profiles
 
-awsctx は SSO Profile 専用です。AWS 設定ファイルの `[profile ...]` のうち、次の 3 つがすべて設定されたものだけを対象にします。
+`awsctx` only shows AWS CLI profiles backed by IAM Identity Center.
+
+A profile is treated as an SSO profile when all of these fields are present:
 
 - `sso_session`
 - `sso_account_id`
 - `sso_role_name`
 
-`[sso-session ...]` 自体は切り替え対象ではありません。`credential_process` などで別の AWS Profile から資格情報を導出する Profile も対象にしません。
-
-## リリース
-
-`v0.1.0` のような SemVer タグを push すると、GitHub Actions が GitHub Release 用の成果物と Homebrew formula を生成します。
-
-Homebrew tap へ formula を push するには、`lemtoc/awsctx` 側の GitHub Actions secret に `HOMEBREW_TAP_TOKEN` を設定します。この token には `lemtoc/homebrew-tap` へ push できる権限が必要です。
+`[sso-session ...]` sections are not profiles and are not shown. Profiles that derive credentials through settings such as `credential_process` are also ignored.
