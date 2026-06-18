@@ -1,0 +1,307 @@
+use anyhow::{Result, anyhow};
+use awsctx::{
+    ProfileOption, SHELL_INTEGRATION_ENV, Shell, SsoProfile, activation_script, current_profile,
+    current_profile_index, filter_profiles, format_profiles_json, format_table, init_line,
+    init_rc_file, parse_sso_profiles, profile_options, rc_path, read_config, resolve_config_path,
+};
+use clap::{Args, Parser, Subcommand};
+use inquire::{InquireError, Select};
+use std::env;
+use std::error::Error;
+use std::fmt;
+use std::process::{Command, ExitCode};
+
+#[derive(Parser, Debug)]
+#[command(name = "awsctx", version, about = "Switch AWS SSO profiles")]
+struct Cli {
+    #[arg(long, global = true, help = "Ignore AWS_PROFILE_PREFIX")]
+    all: bool,
+
+    #[command(subcommand)]
+    command: Option<CommandKind>,
+}
+
+#[derive(Subcommand, Debug)]
+enum CommandKind {
+    #[command(about = "List SSO profiles")]
+    List(ListArgs),
+    #[command(about = "Login with AWS SSO")]
+    Login(LoginArgs),
+    #[command(about = "Print shell integration script")]
+    Activate(ShellArgs),
+    #[command(about = "Add shell integration to an rc file")]
+    Init(InitArgs),
+    #[command(name = "__switch", hide = true)]
+    SwitchInternal,
+    #[command(name = "__login", hide = true)]
+    LoginInternal,
+}
+
+#[derive(Args, Debug)]
+struct ListArgs {
+    #[arg(long, help = "Output JSON")]
+    json: bool,
+}
+
+#[derive(Args, Debug)]
+struct LoginArgs {
+    #[arg(long, help = "Login without changing AWS_PROFILE")]
+    no_switch: bool,
+}
+
+#[derive(Args, Debug)]
+struct ShellArgs {
+    shell: Shell,
+}
+
+#[derive(Args, Debug)]
+struct InitArgs {
+    #[arg(long, help = "Print the rc line without writing it")]
+    print: bool,
+    shell: Shell,
+}
+
+#[derive(Debug)]
+struct ExitError {
+    message: String,
+    code: u8,
+}
+
+impl ExitError {
+    fn new(message: impl Into<String>, code: u8) -> Self {
+        Self {
+            message: message.into(),
+            code,
+        }
+    }
+}
+
+impl fmt::Display for ExitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl Error for ExitError {}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            if let Some(exit_error) = error.downcast_ref::<ExitError>() {
+                if !exit_error.message.is_empty() {
+                    eprintln!("{exit_error}");
+                }
+                return ExitCode::from(exit_error.code);
+            }
+
+            eprintln!("{error:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> Result<()> {
+    let cli = Cli::parse();
+
+    match cli.command {
+        None => switch_command(cli.all),
+        Some(CommandKind::List(args)) => list_command(cli.all, args),
+        Some(CommandKind::Login(args)) => login_command(cli.all, args),
+        Some(CommandKind::Activate(args)) => {
+            print!("{}", activation_script(args.shell));
+            Ok(())
+        }
+        Some(CommandKind::Init(args)) => init_command(args),
+        Some(CommandKind::SwitchInternal) => internal_switch_command(cli.all),
+        Some(CommandKind::LoginInternal) => internal_login_command(cli.all),
+    }
+}
+
+fn switch_command(include_all: bool) -> Result<()> {
+    require_shell_integration()?;
+    let profile = select_profile(include_all)?;
+    println!("{}", profile.name);
+    Ok(())
+}
+
+fn internal_switch_command(include_all: bool) -> Result<()> {
+    require_shell_integration()?;
+    let profile = select_profile(include_all)?;
+    println!("{}", profile.name);
+    Ok(())
+}
+
+fn list_command(include_all: bool, args: ListArgs) -> Result<()> {
+    let (profiles, config_path) = load_profiles()?;
+    let candidates = candidates_or_error(&profiles, &config_path, include_all)?;
+
+    if args.json {
+        println!("{}", format_profiles_json(&candidates)?);
+    } else {
+        println!("{}", format_table(&candidates));
+    }
+
+    Ok(())
+}
+
+fn login_command(include_all: bool, args: LoginArgs) -> Result<()> {
+    if !args.no_switch {
+        require_shell_integration()?;
+    }
+
+    let profile = select_profile(include_all)?;
+    run_aws_sso_login(&profile.name)?;
+
+    if args.no_switch {
+        eprintln!("Logged in to {}.", profile.name);
+    } else {
+        println!("{}", profile.name);
+    }
+
+    Ok(())
+}
+
+fn internal_login_command(include_all: bool) -> Result<()> {
+    require_shell_integration()?;
+    let profile = select_profile(include_all)?;
+    println!("{}", profile.name);
+    Ok(())
+}
+
+fn init_command(args: InitArgs) -> Result<()> {
+    if args.print {
+        println!("{}", init_line(args.shell));
+        return Ok(());
+    }
+
+    let path = rc_path(args.shell)?;
+    init_rc_file(&path, args.shell)?;
+    eprintln!("Updated {}.", path.display());
+    Ok(())
+}
+
+fn select_profile(include_all: bool) -> Result<SsoProfile> {
+    let (profiles, config_path) = load_profiles()?;
+    let candidates = candidates_or_error(&profiles, &config_path, include_all)?;
+
+    if let [profile] = candidates.as_slice() {
+        return Ok(profile.clone());
+    }
+
+    let current_profile = current_profile();
+    let starting_cursor = current_profile_index(&candidates, current_profile.as_deref());
+    let options = profile_options(&candidates, current_profile.as_deref());
+    let selected = Select::new("Select AWS profile", options)
+        .with_starting_cursor(starting_cursor)
+        .with_scorer(&profile_scorer)
+        .with_sorter(&keep_config_order)
+        .prompt()
+        .map_err(map_inquire_error)?;
+
+    Ok(selected.into_profile())
+}
+
+fn load_profiles() -> Result<(Vec<SsoProfile>, std::path::PathBuf)> {
+    let config_path = resolve_config_path()?;
+    let content = read_config(&config_path)?;
+    let profiles = parse_sso_profiles(&content)?;
+    Ok((profiles, config_path))
+}
+
+fn candidates_or_error(
+    profiles: &[SsoProfile],
+    config_path: &std::path::Path,
+    include_all: bool,
+) -> Result<Vec<SsoProfile>> {
+    if profiles.is_empty() {
+        return Err(ExitError::new(
+            format!("No SSO profiles found in {}.", config_path.display()),
+            1,
+        )
+        .into());
+    }
+
+    let prefix = env::var("AWS_PROFILE_PREFIX").ok();
+    let candidates = filter_profiles(profiles, prefix.as_deref(), include_all);
+    if candidates.is_empty() {
+        if let Some(prefix) = prefix.filter(|value| !value.is_empty()) {
+            return Err(ExitError::new(
+                format!(
+                    "No SSO profiles match AWS_PROFILE_PREFIX={} in {}.",
+                    prefix,
+                    config_path.display()
+                ),
+                1,
+            )
+            .into());
+        }
+
+        return Err(ExitError::new(
+            format!("No SSO profiles found in {}.", config_path.display()),
+            1,
+        )
+        .into());
+    }
+
+    Ok(candidates)
+}
+
+fn require_shell_integration() -> Result<()> {
+    if env::var_os(SHELL_INTEGRATION_ENV).is_some() {
+        return Ok(());
+    }
+
+    Err(ExitError::new(
+        "Shell integration is not active. Run eval \"$(awsctx activate <shell>)\" or awsctx init <shell>.",
+        1,
+    )
+    .into())
+}
+
+fn run_aws_sso_login(profile_name: &str) -> Result<()> {
+    let status = Command::new("aws")
+        .args(["sso", "login", "--profile", profile_name])
+        .status()
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                ExitError::new(
+                    "aws command not found. Install AWS CLI to use awsctx login.",
+                    1,
+                )
+                .into()
+            } else {
+                anyhow!(error).context("Failed to run aws sso login.")
+            }
+        })?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(ExitError::new(
+            String::new(),
+            status.code().unwrap_or(1).try_into().unwrap_or(1),
+        )
+        .into())
+    }
+}
+
+fn map_inquire_error(error: InquireError) -> anyhow::Error {
+    match error {
+        InquireError::OperationCanceled | InquireError::OperationInterrupted => {
+            ExitError::new("Canceled.", 130).into()
+        }
+        other => anyhow!(other),
+    }
+}
+
+fn profile_scorer(
+    input: &str,
+    option: &ProfileOption,
+    _string_value: &str,
+    _index: usize,
+) -> Option<i64> {
+    option.matches_filter(input).then_some(0)
+}
+
+fn keep_config_order(_options: &mut [(usize, i64)]) {}
