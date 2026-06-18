@@ -153,3 +153,9 @@ awsctx は SSO Profile 専用です。AWS 設定ファイルの `[profile ...]` 
 - `sso_role_name`
 
 `[sso-session ...]` 自体は切り替え対象ではありません。`credential_process` などで別の AWS Profile から資格情報を導出する Profile も対象にしません。
+
+## リリース
+
+`v0.1.0` のような SemVer タグを push すると、GitHub Actions が GitHub Release 用の成果物と Homebrew formula を生成します。
+
+Homebrew tap へ formula を push するには、`lemtoc/awsctx` 側の GitHub Actions secret に `HOMEBREW_TAP_TOKEN` を設定します。この token には `lemtoc/homebrew-tap` へ push できる権限が必要です。
