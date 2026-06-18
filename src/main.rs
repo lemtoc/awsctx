@@ -1,8 +1,8 @@
 use anyhow::{Result, anyhow};
 use awsctx::{
     ProfileOption, SHELL_INTEGRATION_ENV, Shell, SsoProfile, activation_script, current_profile,
-    current_profile_index, filter_profiles, format_profiles_json, format_table, init_line,
-    init_rc_file, parse_sso_profiles, profile_options, rc_path, read_config, resolve_config_path,
+    filter_profiles, format_profiles_json, format_table, init_line, init_rc_file,
+    parse_sso_profiles, profile_options, rc_path, read_config, resolve_config_path,
 };
 use clap::{Args, Parser, Subcommand};
 use inquire::{InquireError, Select};
@@ -10,6 +10,8 @@ use std::env;
 use std::error::Error;
 use std::fmt;
 use std::process::{Command, ExitCode};
+
+const SELECT_PAGE_SIZE: usize = 10;
 
 #[derive(Parser, Debug)]
 #[command(name = "awsctx", version, about = "Switch AWS SSO profiles")]
@@ -190,10 +192,9 @@ fn select_profile(include_all: bool) -> Result<SsoProfile> {
     }
 
     let current_profile = current_profile();
-    let starting_cursor = current_profile_index(&candidates, current_profile.as_deref());
     let options = profile_options(&candidates, current_profile.as_deref());
     let selected = Select::new("Select AWS profile", options)
-        .with_starting_cursor(starting_cursor)
+        .with_page_size(SELECT_PAGE_SIZE)
         .with_scorer(&profile_scorer)
         .with_sorter(&keep_config_order)
         .prompt()

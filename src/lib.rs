@@ -162,17 +162,6 @@ pub fn profile_options(
         .collect()
 }
 
-pub fn current_profile_index(profiles: &[SsoProfile], current_profile: Option<&str>) -> usize {
-    let Some(current_profile) = current_profile else {
-        return 0;
-    };
-
-    profiles
-        .iter()
-        .position(|profile| profile.name == current_profile)
-        .unwrap_or(0)
-}
-
 pub fn format_table(profiles: &[SsoProfile]) -> String {
     let headers = ["NAME", "ACCOUNT_ID", "ROLE", "REGION"];
     let widths = [
