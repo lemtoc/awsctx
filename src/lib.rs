@@ -221,7 +221,7 @@ pub fn format_table_with_style(
     );
 
     let mut lines = if use_color {
-        vec![dim(&header), dim(&separator)]
+        vec![muted(&header), muted(&separator)]
     } else {
         vec![header, separator]
     };
@@ -586,11 +586,21 @@ fn format_profile_row_with_color(
         cyan(&name)
     };
 
-    format!("{}  {}  {}  {}", name, dim(&account_id), role, dim(region))
+    format!(
+        "{}  {}  {}  {}",
+        name,
+        secondary(&account_id),
+        role,
+        secondary(region)
+    )
 }
 
-fn dim(value: &str) -> String {
-    ansi("90", value)
+fn muted(value: &str) -> String {
+    ansi("38;5;245", value)
+}
+
+fn secondary(value: &str) -> String {
+    ansi("38;5;250", value)
 }
 
 fn green(value: &str) -> String {
@@ -832,10 +842,10 @@ sso_role_name = Admin
         let table = format_table_with_style(&profiles, Some("dev-admin"), true);
         let plain_table = strip_ansi(&table);
 
-        assert!(table.contains("\x1b[90mNAME"));
+        assert!(table.contains("\x1b[38;5;245mNAME"));
         assert!(table.contains("\x1b[36mprod-admin"));
         assert!(table.contains("\x1b[32mdev-admin"));
-        assert!(table.contains("\x1b[90m111122223333"));
+        assert!(table.contains("\x1b[38;5;250m111122223333"));
         assert!(plain_table.contains("prod-admin  111122223333"));
     }
 
