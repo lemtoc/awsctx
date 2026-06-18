@@ -1,8 +1,9 @@
 use anyhow::{Result, anyhow};
 use awsctx::{
     ProfileOption, SHELL_INTEGRATION_ENV, Shell, SsoProfile, activation_script, current_profile,
-    filter_profiles, format_profiles_json, format_table_with_style, init_line, init_rc_file,
-    parse_sso_profiles, profile_options, rc_path, read_config, resolve_config_path,
+    filter_profiles, find_profile_by_name, format_profiles_json, format_table_with_style,
+    init_line, init_rc_file, parse_sso_profiles, profile_options, rc_path, read_config,
+    resolve_config_path,
 };
 use clap::{Args, Parser, Subcommand};
 use inquire::{InquireError, Select};
@@ -35,9 +36,11 @@ enum CommandKind {
     #[command(about = "Add shell integration to an rc file")]
     Init(InitArgs),
     #[command(name = "__switch", hide = true)]
-    SwitchInternal,
+    SwitchInternal(ProfileNameArgs),
     #[command(name = "__login", hide = true)]
-    LoginInternal,
+    LoginInternal(ProfileNameArgs),
+    #[command(external_subcommand)]
+    Profile(Vec<String>),
 }
 
 #[derive(Args, Debug)]
@@ -50,6 +53,14 @@ struct ListArgs {
 struct LoginArgs {
     #[arg(long, help = "Login without changing AWS_PROFILE")]
     no_switch: bool,
+    #[arg(value_name = "NAME")]
+    profile_name: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct ProfileNameArgs {
+    #[arg(value_name = "NAME")]
+    profile_name: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -108,7 +119,7 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        None => switch_command(cli.all),
+        None => switch_command(cli.all, None),
         Some(CommandKind::List(args)) => list_command(cli.all, args),
         Some(CommandKind::Login(args)) => login_command(cli.all, args),
         Some(CommandKind::Activate(args)) => {
@@ -116,23 +127,36 @@ fn run() -> Result<()> {
             Ok(())
         }
         Some(CommandKind::Init(args)) => init_command(args),
-        Some(CommandKind::SwitchInternal) => internal_switch_command(cli.all),
-        Some(CommandKind::LoginInternal) => internal_login_command(cli.all),
+        Some(CommandKind::SwitchInternal(args)) => {
+            internal_switch_command(cli.all, args.profile_name.as_deref())
+        }
+        Some(CommandKind::LoginInternal(args)) => {
+            internal_login_command(cli.all, args.profile_name.as_deref())
+        }
+        Some(CommandKind::Profile(args)) => profile_command(cli.all, &args),
     }
 }
 
-fn switch_command(include_all: bool) -> Result<()> {
+fn switch_command(include_all: bool, profile_name: Option<&str>) -> Result<()> {
     require_shell_integration()?;
-    let profile = select_profile(include_all)?;
+    let profile = resolve_profile(include_all, profile_name)?;
     println!("{}", profile.name);
     Ok(())
 }
 
-fn internal_switch_command(include_all: bool) -> Result<()> {
+fn internal_switch_command(include_all: bool, profile_name: Option<&str>) -> Result<()> {
     require_shell_integration()?;
-    let profile = select_profile(include_all)?;
+    let profile = resolve_profile(include_all, profile_name)?;
     println!("{}", profile.name);
     Ok(())
+}
+
+fn profile_command(include_all: bool, args: &[String]) -> Result<()> {
+    let Some(profile_name) = single_profile_name(args)? else {
+        return Err(ExitError::new("Usage: awsctx <NAME>", 2).into());
+    };
+
+    switch_command(include_all, Some(profile_name))
 }
 
 fn list_command(include_all: bool, args: ListArgs) -> Result<()> {
@@ -158,7 +182,7 @@ fn login_command(include_all: bool, args: LoginArgs) -> Result<()> {
         require_shell_integration()?;
     }
 
-    let profile = select_profile(include_all)?;
+    let profile = resolve_profile(include_all, args.profile_name.as_deref())?;
     run_aws_sso_login(&profile.name)?;
 
     if args.no_switch {
@@ -170,9 +194,9 @@ fn login_command(include_all: bool, args: LoginArgs) -> Result<()> {
     Ok(())
 }
 
-fn internal_login_command(include_all: bool) -> Result<()> {
+fn internal_login_command(include_all: bool, profile_name: Option<&str>) -> Result<()> {
     require_shell_integration()?;
-    let profile = select_profile(include_all)?;
+    let profile = resolve_profile(include_all, profile_name)?;
     println!("{}", profile.name);
     Ok(())
 }
@@ -207,6 +231,45 @@ fn select_profile(include_all: bool) -> Result<SsoProfile> {
         .map_err(map_inquire_error)?;
 
     Ok(selected.into_profile())
+}
+
+fn resolve_profile(include_all: bool, profile_name: Option<&str>) -> Result<SsoProfile> {
+    match profile_name {
+        Some(name) => profile_by_name(name),
+        None => select_profile(include_all),
+    }
+}
+
+fn profile_by_name(profile_name: &str) -> Result<SsoProfile> {
+    let (profiles, config_path) = load_profiles()?;
+
+    if profiles.is_empty() {
+        return Err(ExitError::new(
+            format!("No SSO profiles found in {}.", config_path.display()),
+            1,
+        )
+        .into());
+    }
+
+    find_profile_by_name(&profiles, profile_name).ok_or_else(|| {
+        ExitError::new(
+            format!(
+                "No SSO profile named {} in {}.",
+                profile_name,
+                config_path.display()
+            ),
+            1,
+        )
+        .into()
+    })
+}
+
+fn single_profile_name(args: &[String]) -> Result<Option<&str>> {
+    match args {
+        [] => Ok(None),
+        [profile_name] => Ok(Some(profile_name.as_str())),
+        _ => Err(ExitError::new("Usage: awsctx <NAME>", 2).into()),
+    }
 }
 
 fn load_profiles() -> Result<(Vec<SsoProfile>, std::path::PathBuf)> {

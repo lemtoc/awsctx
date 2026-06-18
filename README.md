@@ -86,6 +86,12 @@ On success, `AWS_PROFILE` is updated in the current shell.
 Switched to prod-admin.
 ```
 
+Switch directly by exact profile name:
+
+```sh
+awsctx prod-admin
+```
+
 Limit the candidates with `AWS_PROFILE_PREFIX`:
 
 ```sh
@@ -153,6 +159,12 @@ After login succeeds, `awsctx` switches to that profile.
 Logged in and switched to prod-admin.
 ```
 
+Login to a profile directly:
+
+```sh
+awsctx login prod-admin
+```
+
 Login without changing `AWS_PROFILE`:
 
 ```sh
@@ -161,6 +173,12 @@ awsctx login --no-switch
 
 ```text
 Logged in to prod-admin.
+```
+
+Direct login without changing `AWS_PROFILE`:
+
+```sh
+awsctx login --no-switch prod-admin
 ```
 
 Ignore `AWS_PROFILE_PREFIX` when choosing the login profile:

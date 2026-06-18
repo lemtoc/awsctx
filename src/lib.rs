@@ -147,6 +147,13 @@ pub fn filter_profiles(
     }
 }
 
+pub fn find_profile_by_name(profiles: &[SsoProfile], name: &str) -> Option<SsoProfile> {
+    profiles
+        .iter()
+        .find(|profile| profile.name == name)
+        .cloned()
+}
+
 pub fn current_profile() -> Option<String> {
     env::var("AWS_PROFILE")
         .ok()
@@ -229,7 +236,17 @@ pub fn activation_script(shell: Shell) -> &'static str {
     match shell {
         Shell::Bash | Shell::Zsh => {
             r#"awsctx() {
+  local __awsctx_should_switch=0
   if [ "$#" -eq 0 ] || { [ "$1" = "--all" ] && [ "$#" -eq 1 ]; }; then
+    __awsctx_should_switch=1
+  elif [ "$#" -eq 1 ] && [ "${1#-}" = "$1" ]; then
+    case "$1" in
+      list|login|activate|init|help|__switch|__login) ;;
+      *) __awsctx_should_switch=1 ;;
+    esac
+  fi
+
+  if [ $__awsctx_should_switch -eq 1 ]; then
     local __awsctx_profile
     __awsctx_profile="$(AWSCTX_SHELL_INTEGRATION=1 command awsctx __switch "$@")"
     local __awsctx_status=$?
@@ -279,7 +296,14 @@ pub fn activation_script(shell: Shell) -> &'static str {
         }
         Shell::Fish => {
             r#"function awsctx
+  set -l __awsctx_should_switch 0
   if test (count $argv) -eq 0; or begin; test "$argv[1]" = "--all"; and test (count $argv) -eq 1; end
+    set __awsctx_should_switch 1
+  else if test (count $argv) -eq 1; and not string match -q -- '-*' "$argv[1]"; and not contains -- "$argv[1]" list login activate init help __switch __login
+    set __awsctx_should_switch 1
+  end
+
+  if test $__awsctx_should_switch -eq 1
     set -l __awsctx_profile
     set -l __awsctx_status
     begin
@@ -692,6 +716,17 @@ sso_role_name = Admin
     }
 
     #[test]
+    fn finds_profile_by_exact_name() {
+        let profiles = parse_sso_profiles(SAMPLE_CONFIG).expect("profiles should parse");
+
+        assert_eq!(
+            find_profile_by_name(&profiles, "prod-admin").map(|profile| profile.name),
+            Some("prod-admin".to_owned())
+        );
+        assert_eq!(find_profile_by_name(&profiles, "prod"), None);
+    }
+
+    #[test]
     fn serializes_json_with_null_optional_fields() {
         let profiles = parse_sso_profiles(
             r#"
@@ -799,6 +834,7 @@ sso_role_name = Admin
         let script = activation_script(Shell::Fish);
 
         assert!(script.contains("function awsctx"));
+        assert!(script.contains("set -l __awsctx_should_switch"));
         assert!(script.contains("set -gx AWS_PROFILE"));
         assert!(script.contains("command awsctx __switch"));
         assert!(script.contains("command awsctx __login"));
