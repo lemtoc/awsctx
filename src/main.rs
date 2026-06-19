@@ -1,9 +1,9 @@
 use anyhow::{Result, anyhow};
 use awsctx::{
-    ProfileOption, SHELL_INTEGRATION_ENV, Shell, SsoProfile, activation_script, current_profile,
-    filter_profiles, find_profile_by_name, format_profiles_json, format_table_with_style,
-    init_line, init_rc_file, parse_sso_profiles, profile_options, rc_path, read_config,
-    resolve_config_path,
+    ProfileOption, SHELL_INTEGRATION_ENV, Shell, SsoProfile, activation_script, aws_wrapper_script,
+    current_profile, filter_profiles, find_profile_by_name, format_profiles_json,
+    format_table_with_style, init_line, init_rc_file, parse_sso_profiles, profile_options, rc_path,
+    read_config, resolve_config_path,
 };
 use clap::{Args, Parser, Subcommand};
 use inquire::{InquireError, Select};
@@ -69,6 +69,11 @@ struct ProfileNameArgs {
 
 #[derive(Args, Debug)]
 struct ShellArgs {
+    #[arg(
+        long,
+        help = "Also define an aws() wrapper so `aws sso switch` switches profiles"
+    )]
+    aws_wrapper: bool,
     shell: Shell,
 }
 
@@ -76,6 +81,11 @@ struct ShellArgs {
 struct InitArgs {
     #[arg(long, help = "Print the rc line without writing it")]
     print: bool,
+    #[arg(
+        long,
+        help = "Also define an aws() wrapper so `aws sso switch` switches profiles"
+    )]
+    aws_wrapper: bool,
     shell: Shell,
 }
 
@@ -128,6 +138,9 @@ fn run() -> Result<()> {
         Some(CommandKind::Login(args)) => login_command(cli.all, args),
         Some(CommandKind::Activate(args)) => {
             print!("{}", activation_script(args.shell));
+            if args.aws_wrapper {
+                print!("{}", aws_wrapper_script(args.shell));
+            }
             Ok(())
         }
         Some(CommandKind::Init(args)) => init_command(args),
@@ -207,13 +220,22 @@ fn internal_login_command(include_all: bool, profile_name: Option<&str>) -> Resu
 
 fn init_command(args: InitArgs) -> Result<()> {
     if args.print {
-        println!("{}", init_line(args.shell));
+        println!("{}", init_line(args.shell, args.aws_wrapper));
         return Ok(());
     }
 
     let path = rc_path(args.shell)?;
-    init_rc_file(&path, args.shell)?;
-    eprintln!("Updated {}.", path.display());
+    init_rc_file(&path, args.shell, args.aws_wrapper)?;
+    let loaded_command = if args.aws_wrapper {
+        "awsctx and aws sso switch"
+    } else {
+        "awsctx"
+    };
+    eprintln!("Updated shell config: {}.", path.display());
+    eprintln!(
+        "Open a new shell, or run `source {}` to load {loaded_command}.",
+        path.display()
+    );
     Ok(())
 }
 

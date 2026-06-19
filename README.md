@@ -72,6 +72,59 @@ For fish:
 awsctx activate fish | source
 ```
 
+### `aws sso switch` alias (optional)
+
+If you would rather type `aws sso switch` than `awsctx`, pass `--aws-wrapper`. It defines an `aws()` shell function that intercepts the (otherwise non-existent) `aws sso switch` subcommand and forwards everything else to the real AWS CLI:
+
+```sh
+awsctx init zsh --aws-wrapper
+```
+
+```sh
+awsctx init bash --aws-wrapper
+```
+
+```fish
+awsctx init fish --aws-wrapper
+```
+
+Then both forms work, just like running `awsctx` directly:
+
+```sh
+aws sso switch              # interactive selection
+aws sso switch prod-admin   # switch by exact name
+aws sso sw prod-admin       # `sw` is a shorter alias for `switch`
+```
+
+This is opt-in because it wraps the `aws` command itself. If an `aws` alias or shell function already exists, awsctx prints a warning and leaves it untouched. When the wrapper is defined, every other `aws` invocation is passed straight through to the AWS CLI.
+
+#### Does wrapping `aws` slow things down or change behavior?
+
+No. The wrapper is a thin shell function with a guard:
+
+```sh
+if alias aws >/dev/null 2>&1 || typeset -f aws >/dev/null 2>&1; then
+  printf 'awsctx: not defining aws wrapper because aws is already an alias or function.\n' >&2
+else
+  function aws {
+    if [ "$1" = "sso" ] && { [ "$2" = "switch" ] || [ "$2" = "sw" ]; }; then
+      shift 2
+      awsctx "$@"             # only this case is handled by awsctx
+      return $?
+    fi
+    command aws "$@"          # everything else goes straight to the real aws
+  }
+fi
+```
+
+- **Existing wrappers are preserved.** If your shell already has an `aws` alias or function, awsctx does not replace it. This avoids bypassing tools such as `aws-vault` or company-specific AWS wrappers.
+- **No measurable overhead.** For any command other than `sso switch`/`sw`, the function runs one or two shell builtin string comparisons (no subprocess, no disk access) and then execs the real binary via `command aws`. That cost is sub-microsecond — negligible next to the AWS CLI's own startup time.
+- **Fully transparent.** Arguments (including spaces), stdin/stdout, pipes, and the exit code are all forwarded unchanged. `aws s3 ls`, `aws sso login`, `aws ... | jq`, and the like behave exactly as before.
+- **Interactive shells only.** The function is defined only in shells that load your rc file. Non-interactive scripts (`#!/bin/bash`, CI) never see it and call the real `aws` directly.
+- **Cosmetic differences only:** `type aws` / `which aws` will report a function. Tab completion for `aws` continues to work in normal setups.
+
+If you would rather not wrap `aws` at all, just omit `--aws-wrapper`; awsctx then never touches the `aws` command.
+
 ## Switch Profiles
 
 Run `awsctx` to select an SSO profile from your AWS config file:

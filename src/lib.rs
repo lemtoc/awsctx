@@ -369,17 +369,63 @@ end
     }
 }
 
-pub fn init_line(shell: Shell) -> String {
+pub fn aws_wrapper_script(shell: Shell) -> &'static str {
     match shell {
-        Shell::Bash | Shell::Zsh => format!("eval \"$(awsctx activate {})\"", shell.as_str()),
-        Shell::Fish => "awsctx activate fish | source".to_owned(),
+        Shell::Bash | Shell::Zsh => {
+            r#"if [ "${__awsctx_aws_wrapper_loaded:-0}" != "1" ]; then
+  if alias aws >/dev/null 2>&1 || typeset -f aws >/dev/null 2>&1; then
+    printf 'awsctx: not defining aws wrapper because aws is already an alias or function.\n' >&2
+  else
+    function aws {
+  if [ "$1" = "sso" ] && { [ "$2" = "switch" ] || [ "$2" = "sw" ]; }; then
+    shift 2
+    awsctx "$@"
+    return $?
+  fi
+
+  command aws "$@"
+}
+    __awsctx_aws_wrapper_loaded=1
+  fi
+fi
+"#
+        }
+        Shell::Fish => {
+            r#"if not set -q __awsctx_aws_wrapper_loaded
+  if functions -q aws
+    printf 'awsctx: not defining aws wrapper because aws is already a function.\n' >&2
+  else
+    function aws
+  if test (count $argv) -ge 2; and test "$argv[1]" = "sso"; and contains -- "$argv[2]" switch sw
+    set -l __awsctx_args $argv[3..-1]
+    awsctx $__awsctx_args
+    return $status
+  end
+
+  command aws $argv
+end
+    set -g __awsctx_aws_wrapper_loaded 1
+  end
+end
+"#
+        }
     }
 }
 
-pub fn init_block(shell: Shell) -> String {
+pub fn init_line(shell: Shell, aws_wrapper: bool) -> String {
+    let flag = if aws_wrapper { " --aws-wrapper" } else { "" };
+    match shell {
+        Shell::Bash | Shell::Zsh => {
+            format!("eval \"$(awsctx activate {}{flag})\"", shell.as_str())
+        }
+        Shell::Fish => format!("awsctx activate fish{flag} | source"),
+    }
+}
+
+pub fn init_block(shell: Shell, aws_wrapper: bool) -> String {
     format!(
         "{MANAGED_BLOCK_START}\n{}\n{MANAGED_BLOCK_END}\n",
-        init_line(shell)
+        init_line(shell, aws_wrapper)
     )
 }
 
@@ -416,7 +462,7 @@ pub fn update_managed_block(contents: &str, block: &str) -> Result<String> {
     Ok(updated)
 }
 
-pub fn init_rc_file(path: &Path, shell: Shell) -> Result<()> {
+pub fn init_rc_file(path: &Path, shell: Shell, aws_wrapper: bool) -> Result<()> {
     let contents = match fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -424,7 +470,7 @@ pub fn init_rc_file(path: &Path, shell: Shell) -> Result<()> {
             return Err(error).with_context(|| format!("Failed to read {}.", path.display()));
         }
     };
-    let updated = update_managed_block(&contents, &init_block(shell))?;
+    let updated = update_managed_block(&contents, &init_block(shell, aws_wrapper))?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create {}.", parent.display()))?;
@@ -876,7 +922,7 @@ sso_role_name = Admin
     fn updates_existing_managed_block() {
         let contents =
             "before\n# >>> awsctx initialize >>>\nold\n# <<< awsctx initialize <<<\nafter\n";
-        let block = init_block(Shell::Zsh);
+        let block = init_block(Shell::Zsh, false);
 
         let updated = update_managed_block(contents, &block).expect("block should update");
 
@@ -888,7 +934,51 @@ sso_role_name = Admin
 
     #[test]
     fn formats_fish_init_line() {
-        assert_eq!(init_line(Shell::Fish), "awsctx activate fish | source");
+        assert_eq!(
+            init_line(Shell::Fish, false),
+            "awsctx activate fish | source"
+        );
+    }
+
+    #[test]
+    fn formats_init_line_with_aws_wrapper_flag() {
+        assert_eq!(
+            init_line(Shell::Zsh, true),
+            "eval \"$(awsctx activate zsh --aws-wrapper)\""
+        );
+        assert_eq!(
+            init_line(Shell::Fish, true),
+            "awsctx activate fish --aws-wrapper | source"
+        );
+    }
+
+    #[test]
+    fn renders_posix_aws_wrapper_script() {
+        let script = aws_wrapper_script(Shell::Zsh);
+
+        assert!(script.contains("alias aws >/dev/null 2>&1"));
+        assert!(script.contains("typeset -f aws >/dev/null 2>&1"));
+        assert!(script.contains("not defining aws wrapper"));
+        assert!(script.contains("function aws {"));
+        assert!(script.contains(
+            "[ \"$1\" = \"sso\" ] && { [ \"$2\" = \"switch\" ] || [ \"$2\" = \"sw\" ]; }"
+        ));
+        assert!(script.contains("awsctx \"$@\""));
+        assert!(script.contains("command aws \"$@\""));
+    }
+
+    #[test]
+    fn renders_fish_aws_wrapper_script() {
+        let script = aws_wrapper_script(Shell::Fish);
+
+        assert!(script.contains("functions -q aws"));
+        assert!(script.contains("not defining aws wrapper"));
+        assert!(script.contains("function aws"));
+        assert!(script.contains("test (count $argv) -ge 2"));
+        assert!(script.contains("test \"$argv[1]\" = \"sso\""));
+        assert!(script.contains("contains -- \"$argv[2]\" switch sw"));
+        assert!(script.contains("awsctx $__awsctx_args"));
+        assert!(script.contains("command aws $argv"));
     }
 
     #[test]
