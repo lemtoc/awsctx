@@ -249,7 +249,7 @@ fn select_profile(include_all: bool) -> Result<SsoProfile> {
 
     let current_profile = current_profile();
     let options = profile_options(&candidates, current_profile.as_deref());
-    let selected = Select::new("Select AWS profile", options)
+    let selected = Select::new("Select AWS profile:", options)
         .with_page_size(SELECT_PAGE_SIZE)
         .with_scorer(&profile_scorer)
         .with_sorter(&keep_config_order)
