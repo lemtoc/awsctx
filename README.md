@@ -6,10 +6,18 @@ It reads SSO profiles from the same AWS config file used by the AWS CLI, shows a
 
 ## Installation
 
+Prebuilt releases are currently published for macOS and Linux. Native Windows releases and installers are not available yet; use WSL or build from source if you want to experiment on Windows.
+
 Install with mise from GitHub Releases:
 
 ```sh
 mise use -g github:lemtoc/awsctx
+```
+
+Install on macOS or Linux with the shell installer from GitHub Releases:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/lemtoc/awsctx/releases/download/v0.2.0/awsctx-installer.sh | sh
 ```
 
 Install with Homebrew:
