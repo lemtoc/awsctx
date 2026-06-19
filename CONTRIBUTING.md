@@ -70,12 +70,9 @@ echo "$AWS_PROFILE"
 
 User-facing documentation lives in `README.md`.
 
-Project planning and domain notes live under `.docs/`:
+Contributor-facing process notes live in this file.
 
-- `.docs/CONTEXT.md`
-- `.docs/REQUIREMENTS.md`
-
-Architecture decisions live under `docs/adr/`.
+If a change needs public design or requirement context, capture that context in the issue, pull request, or user-facing documentation.
 
 ## Release Process
 

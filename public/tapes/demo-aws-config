@@ -1,0 +1,53 @@
+[profile sandbox/readOnly]
+sso_session = demo
+sso_account_id = 111122223333
+sso_role_name = AWSReadOnlyAccess
+region = ap-northeast-1
+output = json
+
+[profile sandbox/powerUser]
+sso_session = demo
+sso_account_id = 111122223333
+sso_role_name = AWSPowerUserAccess
+region = ap-northeast-1
+output = json
+
+[profile sandbox/admin]
+sso_session = demo
+sso_account_id = 111122223333
+sso_role_name = AWSAdministratorAccess
+region = ap-northeast-1
+output = json
+
+[profile demo-app/readOnly]
+sso_session = demo
+sso_account_id = 444455556666
+sso_role_name = AWSReadOnlyAccess
+region = ap-northeast-1
+output = json
+
+[profile demo-app/admin]
+sso_session = demo
+sso_account_id = 444455556666
+sso_role_name = AWSAdministratorAccess
+region = ap-northeast-1
+output = json
+
+[profile training-lab/readOnly]
+sso_session = demo
+sso_account_id = 777788889999
+sso_role_name = AWSReadOnlyAccess
+region = us-west-2
+output = json
+
+[profile training-lab/admin]
+sso_session = demo
+sso_account_id = 777788889999
+sso_role_name = AWSAdministratorAccess
+region = us-west-2
+output = json
+
+[sso-session demo]
+sso_start_url = https://example.awsapps.com/start
+sso_region = ap-northeast-1
+sso_registration_scopes = sso:account:access

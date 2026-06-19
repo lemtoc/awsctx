@@ -62,6 +62,7 @@
               cargo-edit
               cargo-watch
               rust-analyzer
+              vhs
             ];
 
             env = {
