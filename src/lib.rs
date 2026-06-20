@@ -56,6 +56,10 @@ impl ProfileOption {
         self.profile
     }
 
+    pub fn name(&self) -> &str {
+        &self.profile.name
+    }
+
     pub fn matches_filter(&self, input: &str) -> bool {
         if input.is_empty() {
             return true;

@@ -253,10 +253,15 @@ fn select_profile(include_all: bool) -> Result<SsoProfile> {
         .with_page_size(SELECT_PAGE_SIZE)
         .with_scorer(&profile_scorer)
         .with_sorter(&keep_config_order)
+        .with_formatter(&format_selected_profile)
         .prompt()
         .map_err(map_inquire_error)?;
 
     Ok(selected.into_profile())
+}
+
+fn format_selected_profile(option: inquire::list_option::ListOption<&ProfileOption>) -> String {
+    option.value.name().to_owned()
 }
 
 fn resolve_profile(include_all: bool, profile_name: Option<&str>) -> Result<SsoProfile> {
