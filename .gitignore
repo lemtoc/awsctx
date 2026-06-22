@@ -6,6 +6,10 @@
 !.envrc
 .docs/
 
+### mise ###
+mise.local.toml
+.mise.local.toml
+
 ### macOS ###
 # General
 .DS_Store

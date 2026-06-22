@@ -11,6 +11,8 @@ pub const SHELL_INTEGRATION_ENV: &str = "AWSCTX_SHELL_INTEGRATION";
 
 const MANAGED_BLOCK_START: &str = "# >>> awsctx initialize >>>";
 const MANAGED_BLOCK_END: &str = "# <<< awsctx initialize <<<";
+const CURRENT_PROFILE_MARKER: &str = "✓";
+const EMPTY_PROFILE_MARKER: &str = " ";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SsoProfile {
@@ -38,16 +40,23 @@ impl SsoProfile {
 pub struct ProfileOption {
     profile: SsoProfile,
     is_current: bool,
+    show_current_marker: bool,
     row: String,
 }
 
 impl ProfileOption {
-    fn new(profile: SsoProfile, current_profile: Option<&str>, widths: TableWidths) -> Self {
+    fn new(
+        profile: SsoProfile,
+        current_profile: Option<&str>,
+        widths: TableWidths,
+        show_current_marker: bool,
+    ) -> Self {
         let is_current = current_profile == Some(profile.name.as_str());
         let row = format_profile_row(&profile, widths);
         Self {
             profile,
             is_current,
+            show_current_marker,
             row,
         }
     }
@@ -74,8 +83,18 @@ impl ProfileOption {
 
 impl fmt::Display for ProfileOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_current && env::var_os("NO_COLOR").is_none() {
-            write!(formatter, "\x1b[32m{}\x1b[0m", self.row)
+        if self.show_current_marker {
+            let marker = if self.is_current {
+                CURRENT_PROFILE_MARKER
+            } else {
+                EMPTY_PROFILE_MARKER
+            };
+
+            if self.is_current && env::var_os("NO_COLOR").is_none() {
+                write!(formatter, "{} {}", green(marker), self.row)
+            } else {
+                write!(formatter, "{} {}", marker, self.row)
+            }
         } else {
             formatter.write_str(&self.row)
         }
@@ -178,10 +197,11 @@ pub fn profile_options(
     current_profile: Option<&str>,
 ) -> Vec<ProfileOption> {
     let widths = table_widths(profiles);
+    let show_current_marker = has_current_profile(profiles, current_profile);
     profiles
         .iter()
         .cloned()
-        .map(|profile| ProfileOption::new(profile, current_profile, widths))
+        .map(|profile| ProfileOption::new(profile, current_profile, widths, show_current_marker))
         .collect()
 }
 
@@ -191,7 +211,7 @@ pub fn format_table(profiles: &[SsoProfile]) -> String {
 
 pub fn format_table_with_style(
     profiles: &[SsoProfile],
-    current_profile: Option<&str>,
+    _current_profile: Option<&str>,
     use_color: bool,
 ) -> String {
     let headers = ["NAME", "ACCOUNT_ID", "ROLE", "REGION"];
@@ -232,7 +252,7 @@ pub fn format_table_with_style(
 
     lines.extend(profiles.iter().map(|profile| {
         if use_color {
-            format_profile_row_with_color(profile, current_profile, widths)
+            format_profile_row_with_color(profile, widths)
         } else {
             format_profile_row(profile, widths)
         }
@@ -604,6 +624,12 @@ fn table_widths(profiles: &[SsoProfile]) -> TableWidths {
     }
 }
 
+fn has_current_profile(profiles: &[SsoProfile], current_profile: Option<&str>) -> bool {
+    profiles
+        .iter()
+        .any(|profile| current_profile == Some(profile.name.as_str()))
+}
+
 fn format_profile_row(profile: &SsoProfile, widths: TableWidths) -> String {
     format!(
         "{:<name_width$}  {:<account_width$}  {:<role_width$}  {}",
@@ -617,11 +643,7 @@ fn format_profile_row(profile: &SsoProfile, widths: TableWidths) -> String {
     )
 }
 
-fn format_profile_row_with_color(
-    profile: &SsoProfile,
-    current_profile: Option<&str>,
-    widths: TableWidths,
-) -> String {
+fn format_profile_row_with_color(profile: &SsoProfile, widths: TableWidths) -> String {
     let name = format!("{:<width$}", profile.name, width = widths.name);
     let account_id = format!(
         "{:<width$}",
@@ -630,12 +652,7 @@ fn format_profile_row_with_color(
     );
     let role = format!("{:<width$}", profile.sso_role_name, width = widths.role);
     let region = profile.region.as_deref().unwrap_or_default();
-    let name = if current_profile == Some(profile.name.as_str()) {
-        green(&name)
-    } else {
-        cyan(&name)
-    };
-
+    let name = cyan(&name);
     format!(
         "{}  {}  {}  {}",
         name,
@@ -654,11 +671,15 @@ fn secondary(value: &str) -> String {
 }
 
 fn green(value: &str) -> String {
-    ansi("32", value)
+    ansi_foreground("32", value)
 }
 
 fn cyan(value: &str) -> String {
     ansi("36", value)
+}
+
+fn ansi_foreground(code: &str, value: &str) -> String {
+    format!("\x1b[{code}m{value}\x1b[39m")
 }
 
 fn ansi(code: &str, value: &str) -> String {
@@ -894,9 +915,26 @@ sso_role_name = Admin
 
         assert!(table.contains("\x1b[38;5;245mNAME"));
         assert!(table.contains("\x1b[36mprod-admin"));
-        assert!(table.contains("\x1b[32mdev-admin"));
+        assert!(table.contains("\x1b[36mdev-admin"));
         assert!(table.contains("\x1b[38;5;250m111122223333"));
         assert!(plain_table.contains("prod-admin  111122223333"));
+        assert!(!plain_table.contains(CURRENT_PROFILE_MARKER));
+    }
+
+    #[test]
+    fn does_not_mark_current_profile_in_table() {
+        let profiles = parse_sso_profiles(SAMPLE_CONFIG).expect("profiles should parse");
+
+        let table = format_table_with_style(&profiles, Some("dev-admin"), false);
+        let lines = table.lines().collect::<Vec<_>>();
+
+        assert_eq!(
+            lines[0],
+            "NAME        ACCOUNT_ID    ROLE                    REGION"
+        );
+        assert!(lines[2].starts_with("prod-admin"));
+        assert!(lines[3].starts_with("dev-admin"));
+        assert!(!table.contains(CURRENT_PROFILE_MARKER));
     }
 
     #[test]
@@ -906,6 +944,7 @@ sso_role_name = Admin
             .iter()
             .map(ToString::to_string)
             .map(|row| strip_ansi(&row))
+            .map(|row| normalize_current_marker(&row))
             .collect::<Vec<_>>();
 
         assert_eq!(
@@ -1019,5 +1058,9 @@ sso_role_name = Admin
     fn field_start(line: &str, field: &str) -> usize {
         line.find(field)
             .unwrap_or_else(|| panic!("expected {field} in {line}"))
+    }
+
+    fn normalize_current_marker(value: &str) -> String {
+        value.replacen(CURRENT_PROFILE_MARKER, EMPTY_PROFILE_MARKER, 1)
     }
 }

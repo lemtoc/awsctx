@@ -6,7 +6,10 @@ use awsctx::{
     read_config, resolve_config_path,
 };
 use clap::{Args, Parser, Subcommand};
-use inquire::{InquireError, Select};
+use inquire::{
+    InquireError, Select,
+    ui::{Color, RenderConfig, StyleSheet},
+};
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -251,6 +254,7 @@ fn select_profile(include_all: bool) -> Result<SsoProfile> {
     let options = profile_options(&candidates, current_profile.as_deref());
     let selected = Select::new("Select AWS profile:", options)
         .with_page_size(SELECT_PAGE_SIZE)
+        .with_render_config(select_render_config())
         .with_scorer(&profile_scorer)
         .with_sorter(&keep_config_order)
         .with_formatter(&format_selected_profile)
@@ -258,6 +262,18 @@ fn select_profile(include_all: bool) -> Result<SsoProfile> {
         .map_err(map_inquire_error)?;
 
     Ok(selected.into_profile())
+}
+
+fn select_render_config() -> RenderConfig<'static> {
+    if env::var_os("NO_COLOR").is_some() {
+        return RenderConfig::empty();
+    }
+
+    RenderConfig::default().with_selected_option(Some(
+        StyleSheet::new()
+            .with_fg(Color::White)
+            .with_bg(Color::DarkBlue),
+    ))
 }
 
 fn format_selected_profile(option: inquire::list_option::ListOption<&ProfileOption>) -> String {
