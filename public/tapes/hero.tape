@@ -27,7 +27,7 @@ Show
 Type "awsctx list"
 Sleep 700ms
 Enter
-Sleep 2.5s
+Sleep 2s
 
 Type "awsctx"
 Sleep 700ms
@@ -35,13 +35,13 @@ Enter
 Wait+Screen /Select AWS profile:/
 Sleep 700ms
 Type "sand"
-Sleep 2s
+Sleep 1s
 Enter
 Wait+Screen /Switched to sandbox\/readOnly./
 Sleep 1.5s
 
 Type "export AWS_ACCOUNT_ID=111122223333"
-Sleep 900ms
+Sleep 700ms
 Enter
 Sleep 1.5s
 
@@ -50,8 +50,10 @@ Sleep 700ms
 Enter
 Wait+Screen /Select AWS profile:/
 Sleep 700ms
-Down 2
-Sleep 1.5s
+Down 1
+Sleep 300ms
+Down 1
+Sleep 1s
 Enter
 Wait+Screen /Switched to sandbox\/admin./
-Sleep 4s
+Sleep 5s

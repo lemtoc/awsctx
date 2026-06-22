@@ -2,7 +2,8 @@
   description = "A Nix-flake-based Rust development environment";
 
   inputs = {
-    nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1"; # unstable Nixpkgs
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    vhs-nixpkgs.url = "https://flakehub.com/f/DeterminateSystems/nixpkgs-weekly/0.1";
     fenix = {
       url = "https://flakehub.com/f/nix-community/fenix/0.1";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -10,33 +11,40 @@
   };
 
   outputs =
-    { self, ... }@inputs:
-
+    {
+      self,
+      nixpkgs,
+      vhs-nixpkgs,
+      fenix,
+      ...
+    }:
     let
-      supportedSystems = [
+      systems = [
         "x86_64-linux"
         "aarch64-linux"
         "x86_64-darwin"
         "aarch64-darwin"
       ];
-      forEachSupportedSystem =
+      forEachSystem =
         f:
-        inputs.nixpkgs.lib.genAttrs supportedSystems (
+        nixpkgs.lib.genAttrs systems (
           system:
-          f {
-            pkgs = import inputs.nixpkgs {
+          f (
+            import nixpkgs {
               inherit system;
               overlays = [
-                inputs.self.overlays.default
+                self.overlays.default
               ];
-            };
-          }
+            }
+          )
         );
     in
     {
+      formatter = forEachSystem (pkgs: pkgs.nixfmt-tree);
+
       overlays.default = final: prev: {
         rustToolchain =
-          with inputs.fenix.packages.${prev.stdenv.hostPlatform.system};
+          with fenix.packages.${prev.stdenv.hostPlatform.system};
           combine (
             with stable;
             [
@@ -49,8 +57,22 @@
           );
       };
 
-      devShells = forEachSupportedSystem (
-        { pkgs }:
+      devShells = forEachSystem (
+        pkgs:
+        let
+          vhsPkgs = import vhs-nixpkgs {
+            system = pkgs.stdenv.hostPlatform.system;
+          };
+          fixedVhs = pkgs.writeShellScriptBin "vhs" ''
+            export PATH="${
+              pkgs.lib.makeBinPath [
+                vhsPkgs.ttyd
+                vhsPkgs.ffmpeg
+              ]
+            }:$PATH"
+            exec ${pkgs.vhs}/bin/.vhs-wrapped "$@"
+          '';
+        in
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
@@ -62,7 +84,7 @@
               cargo-edit
               cargo-watch
               rust-analyzer
-              vhs
+              fixedVhs
             ];
 
             env = {
