@@ -1,6 +1,6 @@
 [package]
 name = "awsctx"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 description = "Switch AWS SSO profiles in the current shell"
 license = "MIT"
